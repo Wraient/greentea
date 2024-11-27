@@ -1776,6 +1776,8 @@ func main() {
 		fmt.Println("Error creating Discord session:", err)
 		return
 	}
+	// Set required intents
+	discord.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentMessageContent
 	channelID := os.Getenv("GREENTEA_CHANNEL_ID")
 	if channelID == "" {
 		fmt.Println("Error: GREENTEA_CHANNEL_ID environment variable not set")
@@ -1783,7 +1785,7 @@ func main() {
 	}
 	
 	// Updated pattern to match both tea emoji types
-	pattern := regexp.MustCompile(`^(?:🍵|:tea:) Quickly type a word containing: ([A-Z]+)$`)
+	pattern := regexp.MustCompile(`^(?:🍵|:tea:) Quickly type a word containing: \*\*([A-Z]+)\*\*$`)
 	
 	// Set up message handler
 	discord.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -1791,21 +1793,33 @@ func main() {
 			return
 		}
 		
-		// Print message details
-		fmt.Printf("Author: %s\nContent: %s\n-------------------\n", 
-			m.Author.Username, 
-			m.Content)
+		// Enhanced debugging
+		fmt.Printf("Message Details:\n")
+		fmt.Printf("- Author: %s (ID: %s)\n", m.Author.Username, m.Author.ID)
+		fmt.Printf("- Bot: %v\n", m.Author.Bot)
+		fmt.Printf("- Content: %q\n", m.Content)
+		fmt.Printf("- Raw Length: %d\n", len(m.Content))
+		if len(m.Embeds) > 0 {
+			fmt.Printf("- Has Embeds: %d embeds\n", len(m.Embeds))
+			for i, embed := range m.Embeds {
+				fmt.Printf("  Embed %d Description: %q\n", i+1, embed.Description)
+			}
+		}
+		fmt.Println("-------------------")
 
 		// Check if message matches the pattern
 		matches := pattern.FindStringSubmatch(m.Content)
 		if len(matches) > 1 {
 			searchTerm := matches[1]
-			fmt.Printf("Found search term: %s\n", searchTerm) // Debug print
+			fmt.Printf("Found search term: %s\n", searchTerm)
 			
 			word := findWord(searchTerm)
-			fmt.Printf("Found word: %s\n", word) // Debug print
+			fmt.Printf("Found word: %s\n", word)
 			
 			if word != "" {
+				// Add a small random delay (100-500ms)
+				time.Sleep(time.Duration(100+rand.Intn(400)) * time.Millisecond)
+				
 				// Send the word to the channel
 				_, err := s.ChannelMessageSend(channelID, word)
 				if err != nil {
@@ -1813,7 +1827,7 @@ func main() {
 				}
 			}
 		} else {
-			fmt.Println("Message did not match pattern") // Debug print
+			fmt.Println("Message did not match pattern")
 		}
 	})
 	
