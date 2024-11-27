@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"os/exec"
 	"math/rand"
 	"time"
+	"github.com/bwmarrin/discordgo"
+	"regexp"
+	"syscall"
+	"os/signal"
+	"context"
 )
 
 var dictionary = `
@@ -1264,23 +1268,6 @@ occurrence n. C1
 odds n. C1
 offender n. B2
 offering n. C1
-offspring n. C1
-ongoing adj. B2
-openly adv. B2
-opera n. B2
-operational adj. C1
-operator n. B2
-opt v. C1
-optical adj. C1
-optimism n. C1
-optimistic adj. B2
-oral adj. C1
-orchestra n. B2
-organic adj. B2
-organizational adj. C1
-orientation n. C1
-originate v. C1
-outbreak n. C1
 outfit n. B2
 outing n. C1
 outlet n. C1
@@ -1735,89 +1722,128 @@ yell v. C1
 yield n., v. C1
 `
 
-func searchAndCopy(searchTerm string, previousWords map[string]bool) bool {
+func findWord(searchTerm string) string {
 	reader := strings.NewReader(dictionary)
 	scanner := bufio.NewScanner(reader)
-	
-	// Collect all matching words
-	var matches []string
-	var allMatches []string  // Track all matches, including previous ones
+	var regularMatches []string
+	var hyphenatedMatches []string
 	
 	for scanner.Scan() {
 		line := scanner.Text()
-		// Skip empty lines
 		if len(strings.TrimSpace(line)) == 0 {
 			continue
 		}
 		
 		fields := strings.Fields(line)
-		// Skip lines that don't have any words
 		if len(fields) == 0 {
 			continue
 		}
 		
 		word := fields[0]
 		if strings.Contains(strings.ToLower(word), strings.ToLower(searchTerm)) {
-			allMatches = append(allMatches, word)
-			if !previousWords[word] {
-				matches = append(matches, word)
+			if strings.Contains(word, "-") {
+				hyphenatedMatches = append(hyphenatedMatches, word)
+			} else {
+				regularMatches = append(regularMatches, word)
 			}
 		}
 	}
-
-	if len(matches) == 0 {
-		if len(allMatches) == 0 {
-			fmt.Println("No matching words found")
-			return false
-		}
-		// Reset previous words and use all matches
-		for k := range previousWords {
-			delete(previousWords, k)
-		}
-		matches = allMatches
-		fmt.Println("No new matches - resetting history and showing all matches again")
+	
+	// First try to return a regular word (without hyphen)
+	if len(regularMatches) > 0 {
+		return regularMatches[rand.Intn(len(regularMatches))]
 	}
-
-	// Pick a random match
-	randomIndex := rand.Intn(len(matches))
-	selectedWord := matches[randomIndex]
-	previousWords[selectedWord] = true
-
-	// Copy to clipboard
-	cmd := exec.Command("wl-copy", selectedWord)
-	err := cmd.Run()
-	if err != nil {
-		fmt.Println("Error copying to clipboard:", err)
-		return false
+	
+	// If no regular matches found, fall back to hyphenated words
+	if len(hyphenatedMatches) > 0 {
+		return hyphenatedMatches[rand.Intn(len(hyphenatedMatches))]
 	}
-	fmt.Printf("Found and copied: %s (%d more matches available)\n", selectedWord, len(matches)-1)
-	return true
+	
+	return ""
 }
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-	reader := bufio.NewReader(os.Stdin)
-	previousWords := make(map[string]bool)
 	
-	for {
-		fmt.Print("Enter substring (or 'quit' to exit): ")
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
-		
-		if input == "quit" {
-			break
-		}
-		
-		if input == "clear" {
-			previousWords = make(map[string]bool)
-			fmt.Println("History cleared!")
-			continue
-		}
-		
-		if input == "" {
-			continue
-		}
-		
-		searchAndCopy(input, previousWords)
+	discordToken := os.Getenv("DISCORD_TOKEN")
+	if discordToken == "" {
+		fmt.Println("Error: DISCORD_TOKEN environment variable not set")
+		return
 	}
+	// Create Discord session with user token
+	discord, err := discordgo.New(discordToken)
+	if err != nil {
+		fmt.Println("Error creating Discord session:", err)
+		return
+	}
+	channelID := os.Getenv("GREENTEA_CHANNEL_ID")
+	if channelID == "" {
+		fmt.Println("Error: GREENTEA_CHANNEL_ID environment variable not set")
+		return
+	}
+	
+	// Updated pattern to match both tea emoji types
+	pattern := regexp.MustCompile(`^(?:🍵|:tea:) Quickly type a word containing: ([A-Z]+)$`)
+	
+	// Set up message handler
+	discord.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+		if m.ChannelID != channelID {
+			return
+		}
+		
+		// Print message details
+		fmt.Printf("Author: %s\nContent: %s\n-------------------\n", 
+			m.Author.Username, 
+			m.Content)
+
+		// Check if message matches the pattern
+		matches := pattern.FindStringSubmatch(m.Content)
+		if len(matches) > 1 {
+			searchTerm := matches[1]
+			fmt.Printf("Found search term: %s\n", searchTerm) // Debug print
+			
+			word := findWord(searchTerm)
+			fmt.Printf("Found word: %s\n", word) // Debug print
+			
+			if word != "" {
+				// Send the word to the channel
+				_, err := s.ChannelMessageSend(channelID, word)
+				if err != nil {
+					fmt.Println("Error sending message:", err)
+				}
+			}
+		} else {
+			fmt.Println("Message did not match pattern") // Debug print
+		}
+	})
+	
+	// Create a context that can be cancelled
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = discord.Open()
+	if err != nil {
+		fmt.Println("Error opening connection:", err)
+		return
+	}
+
+	// Clean shutdown handler
+	go func() {
+		sc := make(chan os.Signal, 1)
+		signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
+		<-sc
+
+		fmt.Println("\nReceived shutdown signal. Cleaning up...")
+		
+		// Cancel context and close Discord connection
+		cancel()
+		discord.Close()
+		
+		// Force exit after a short timeout
+		time.Sleep(time.Second)
+		os.Exit(0)
+	}()
+
+	// Wait for context cancellation
+	<-ctx.Done()
 }
