@@ -1718,7 +1718,7 @@ yell v. C1
 yield n., v. C1
 `
 
-func findWord(searchTerm string, usedWords map[string]bool) string {
+func findWord(searchTerm string, usedWords map[string]bool) (string, bool) {
     reader := strings.NewReader(dictionary)
     scanner := bufio.NewScanner(reader)
     var regularMatches []string
@@ -1729,10 +1729,10 @@ func findWord(searchTerm string, usedWords map[string]bool) string {
         if len(strings.TrimSpace(line)) == 0 {
             continue
         }
-        
+    
         word := strings.Fields(line)[0]
         if strings.Contains(strings.ToLower(word), strings.ToLower(searchTerm)) {
-            if !usedWords[word] {  // Only add words that haven't been used
+            if !usedWords[word] {
                 if strings.Contains(word, "-") {
                     hyphenatedMatches = append(hyphenatedMatches, word)
                 } else {
@@ -1742,12 +1742,15 @@ func findWord(searchTerm string, usedWords map[string]bool) string {
         }
     }
     
-    // If no unused words are found, clear the usedWords map and search again
+    // If no unused words are found, clear the usedWords map and try again
     if len(regularMatches) == 0 && len(hyphenatedMatches) == 0 {
-        for k := range usedWords {
-            delete(usedWords, k)
+        if len(usedWords) > 0 {  // Only try again if we had used words
+            for k := range usedWords {
+                delete(usedWords, k)
+            }
+            return findWord(searchTerm, usedWords)
         }
-        return findWord(searchTerm, usedWords)  // Recursive call with empty usedWords
+        return "", false  // No matches found at all
     }
     
     var selectedWord string
@@ -1761,7 +1764,7 @@ func findWord(searchTerm string, usedWords map[string]bool) string {
         usedWords[selectedWord] = true
     }
     
-    return selectedWord
+    return selectedWord, true
 }
 
 func copyToClipboard(text string) error {
@@ -1798,15 +1801,15 @@ func main() {
             break
         }
         
-        word := findWord(searchTerm, usedWords)
-        if word != "" {
+        word, found := findWord(searchTerm, usedWords)
+        if found && word != "" {
             if err := copyToClipboard(word); err != nil {
                 fmt.Println("Error copying to clipboard:", err)
                 continue
             }
             fmt.Printf("Found and copied to clipboard: %s\n", word)
         } else {
-            fmt.Println("No matching word found")
+            fmt.Println("No matching word found in dictionary")
         }
     }
 }

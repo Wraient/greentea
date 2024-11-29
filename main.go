@@ -1722,7 +1722,7 @@ yell v. C1
 yield n., v. C1
 `
 
-func findWord(searchTerm string) string {
+func findWord(searchTerm string) (string, bool) {
 	reader := strings.NewReader(dictionary)
 	scanner := bufio.NewScanner(reader)
 	var regularMatches []string
@@ -1751,15 +1751,16 @@ func findWord(searchTerm string) string {
 	
 	// First try to return a regular word (without hyphen)
 	if len(regularMatches) > 0 {
-		return regularMatches[rand.Intn(len(regularMatches))]
+		return regularMatches[rand.Intn(len(regularMatches))], true
 	}
 	
 	// If no regular matches found, fall back to hyphenated words
 	if len(hyphenatedMatches) > 0 {
-		return hyphenatedMatches[rand.Intn(len(hyphenatedMatches))]
+		return hyphenatedMatches[rand.Intn(len(hyphenatedMatches))], true
 	}
 	
-	return ""
+	fmt.Println("No matching word found in dictionary")
+	return "", false
 }
 
 func main() {
@@ -1813,10 +1814,10 @@ func main() {
 			searchTerm := matches[1]
 			fmt.Printf("Found search term: %s\n", searchTerm)
 			
-			word := findWord(searchTerm)
-			fmt.Printf("Found word: %s\n", word)
+			word, found := findWord(searchTerm)
+			fmt.Printf("Found word: %s (found: %v)\n", word, found)
 			
-			if word != "" {
+			if found && word != "" {
 				// Add a small random delay (100-500ms)
 				time.Sleep(time.Duration(100+rand.Intn(400)) * time.Millisecond)
 				
